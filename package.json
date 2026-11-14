@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "seed": "tsx scripts/seed.ts",
     "convex": "convex dev",
-    "import": "tsx scripts/import.ts"
+    "import": "tsx scripts/import.ts",
+    "wipe": "tsx scripts/wipe.ts"
   },
   "dependencies": {
     "convex": "1.48.0",
