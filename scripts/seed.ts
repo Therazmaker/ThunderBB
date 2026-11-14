@@ -7,20 +7,16 @@
  *
  * Lee VITE_CONVEX_URL de .env.local e IMPORT_TOKEN del entorno o de .env.local.
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { loadEnv } from './env.js';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../convex/_generated/api.js';
 import type { Id } from '../convex/_generated/dataModel.js';
 import { mockSource } from '../src/data/mockSource.js';
 import type { Folder } from '../src/types.js';
 
-const env: Record<string, string> = { ...process.env } as Record<string, string>;
-if (existsSync('.env.local')) for (const line of readFileSync('.env.local', 'utf8').split('\n')) {
-  const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*(#.*)?$/);
-  if (m && !env[m[1]]) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-}
-const url = env.VITE_CONVEX_URL;
-const token = env.IMPORT_TOKEN;
+const env = loadEnv();
+const url = env.VITE_CONVEX_URL ?? '';
+const token = env.IMPORT_TOKEN ?? '';
 if (!url || !token) { console.error('Faltan VITE_CONVEX_URL o IMPORT_TOKEN'); process.exit(1); }
 
 const args = process.argv.slice(2);

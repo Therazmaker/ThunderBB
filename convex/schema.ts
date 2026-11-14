@@ -34,8 +34,12 @@ export default defineSchema({
     tags: v.array(v.string()),
     /** Asunto + remitente normalizados, para el índice de búsqueda. */
     searchText: v.string(),
+    /** Message-ID (o hash del mensaje): evita duplicados al relanzar una importación. */
+    messageKey: v.optional(v.string()),
   })
     .index('by_folder_date', ['folderId', 'date'])
+    .index('by_folder_key', ['folderId', 'messageKey'])
+    .index('by_folder_thread', ['folderId', 'threadId', 'isReply'])
     .searchIndex('search', { searchField: 'searchText', filterFields: ['folderId'] }),
 
   /** Cuerpo y destinatarios. Un documento Convex admite hasta 1 MB; los HTML más grandes van a storage. */

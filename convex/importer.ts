@@ -1,5 +1,5 @@
 import { v, ConvexError } from 'convex/values';
-import { mutation } from './_generated/server';
+import { mutation, query } from './_generated/server';
 import { folderKind } from './schema';
 
 /**
@@ -39,6 +39,7 @@ export const insertMessages = mutation({
     token: v.string(),
     folderId: v.id('folders'),
     messages: v.array(v.object({
+      messageKey: v.optional(v.string()),
       threadId: v.string(),
       isReply: v.boolean(),
       replyCount: v.number(),
@@ -63,9 +64,16 @@ export const insertMessages = mutation({
     checkToken(token);
     const folder = await ctx.db.get(folderId);
     if (!folder) throw new ConvexError('Carpeta inexistente');
-    let unread = 0;
+    let unread = 0, inserted = 0;
     for (const m of messages) {
+      if (m.messageKey) {
+        const dup = await ctx.db.query('messages')
+          .withIndex('by_folder_key', (q) => q.eq('folderId', folderId).eq('messageKey', m.messageKey)).first();
+        if (dup) continue;
+      }
+      inserted++;
       const id = await ctx.db.insert('messages', {
+        messageKey: m.messageKey,
         folderId, threadId: m.threadId, isReply: m.isReply, replyCount: m.replyCount,
         fromName: m.from.name, fromEmail: m.from.email, subject: m.subject, date: m.date,
         hasAttachments: m.attachments.some((a) => !a.inline),
@@ -76,8 +84,36 @@ export const insertMessages = mutation({
       for (const a of m.attachments) await ctx.db.insert('attachments', { messageId: id, ...a });
       if (!m.read) unread++;
     }
-    await ctx.db.patch(folderId, { total: folder.total + messages.length, unread: folder.unread + unread });
-    return messages.length;
+    await ctx.db.patch(folderId, { total: folder.total + inserted, unread: folder.unread + unread });
+    return inserted;
+  },
+});
+
+/** Cuáles de estas claves ya están importadas en la carpeta (para no volver a subir adjuntos). */
+export const existingKeys = query({
+  args: { token: v.string(), folderId: v.id('folders'), keys: v.array(v.string()) },
+  handler: async (ctx, { token, folderId, keys }) => {
+    checkToken(token);
+    const found: string[] = [];
+    for (const k of keys) {
+      const doc = await ctx.db.query('messages')
+        .withIndex('by_folder_key', (q) => q.eq('folderId', folderId).eq('messageKey', k)).first();
+      if (doc) found.push(k);
+    }
+    return found;
+  },
+});
+
+/** Fija el número de respuestas en el mensaje raíz de cada hilo. */
+export const setReplyCounts = mutation({
+  args: { token: v.string(), folderId: v.id('folders'), counts: v.array(v.object({ threadId: v.string(), count: v.number() })) },
+  handler: async (ctx, { token, folderId, counts }) => {
+    checkToken(token);
+    for (const { threadId, count } of counts) {
+      const root = await ctx.db.query('messages')
+        .withIndex('by_folder_thread', (q) => q.eq('folderId', folderId).eq('threadId', threadId).eq('isReply', false)).first();
+      if (root && root.replyCount !== count) await ctx.db.patch(root._id, { replyCount: count });
+    }
   },
 });
 
