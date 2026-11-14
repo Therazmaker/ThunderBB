@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Folder, MessageDetail, MessageSummary } from './types';
-import { mockSource } from './data/mockSource';
-import type { MailSource } from './data/source';
+import { source, usingConvex } from './data';
 import { TitleBar } from './components/TitleBar';
 import { MenuBar, type Menu } from './components/MenuBar';
 import { FolderPane } from './components/FolderPane';
@@ -9,8 +8,6 @@ import { MessageList } from './components/MessageList';
 import { emptyFilter, type QuickFilter } from './components/QuickFilterBar';
 import { MessageReader, StartPage } from './components/MessageReader';
 import { StatusBar } from './components/StatusBar';
-
-const source: MailSource = mockSource;
 
 function walk(list: Folder[], fn: (f: Folder) => void) { for (const f of list) { fn(f); walk(f.children, fn); } }
 function useDebounced<T>(v: T, ms: number) {
@@ -43,7 +40,9 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const dq = useDebounced(norm(query.trim()), 200);
-  const [searchPool, setSearchPool] = useState<MessageSummary[] | null>(null);
+  const [searchResults, setSearchResults] = useState<MessageSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
 
   // Árbol inicial: todo expandido y la primera carpeta con mensajes seleccionada.
   useEffect(() => {
@@ -54,7 +53,7 @@ export default function App() {
       walk(t, (f) => { if (f.children.length) ids.add(f.id); else if (!firstLeaf && f.total > 0) firstLeaf = f.id; });
       setExpanded(ids);
       setFolderId(firstLeaf);
-    });
+    }).catch(fail);
   }, []);
 
   const folderMap = useMemo(() => { const m = new Map<string, Folder>(); walk(tree, (f) => m.set(f.id, f)); return m; }, [tree]);
@@ -62,51 +61,68 @@ export default function App() {
 
   useEffect(() => {
     if (!folderId) return;
+    let live = true;
     setLoading(true);
+    setRaw([]);
     setSelectedId(null);
-    source.listMessages(folderId).then((ms) => { setRaw(ms); setLoading(false); });
+    source.listMessages(folderId, (partial) => { if (live) { setRaw(partial); setLoading(false); } })
+      .then((ms) => { if (live) { setRaw(ms); setLoading(false); } })
+      .catch(fail);
     setFilter((f) => (f.sticky ? f : { ...emptyFilter }));
+    return () => { live = false; };
   }, [folderId]);
 
-  // Búsqueda global: recorre todas las carpetas.
+  // Búsqueda global en todo el archivo.
   useEffect(() => {
-    if (!dq) { setSearchPool(null); return; }
-    const leaves: string[] = [];
-    walk(tree, (f) => { if (f.total > 0) leaves.push(f.id); });
-    Promise.all(leaves.map((id) => source.listMessages(id))).then((all) => setSearchPool(all.flat()));
-  }, [dq, tree]);
+    if (!dq) { setSearchResults(null); return; }
+    let live = true;
+    source.search(dq).then((r) => { if (live) setSearchResults(r); }).catch(fail);
+    return () => { live = false; };
+  }, [dq]);
 
   const apply = useCallback((m: MessageSummary): MessageSummary => {
     const o = overrides[m.id];
     return o ? { ...m, ...o } : m;
   }, [overrides]);
 
-  const searching = !!dq && !!searchPool;
+  const searching = !!dq && !!searchResults;
   const fq = norm(filter.text.trim());
   const filtering = !!fq || filter.unread || filter.starred || filter.contacts || filter.tags || filter.attachments;
 
   const visible = useMemo(() => {
-    let list = (searching ? searchPool!.filter((m) => matches(m, dq)) : raw).map(apply);
+    let list = (searching ? searchResults! : raw).map(apply);
     if (fq) list = list.filter((m) => matches(m, fq));
     if (filter.unread) list = list.filter((m) => !m.read);
     if (filter.starred) list = list.filter((m) => m.starred);
     if (filter.tags) list = list.filter((m) => m.tags.length > 0);
     if (filter.attachments) list = list.filter((m) => m.hasAttachments);
     return list;
-  }, [searching, searchPool, dq, raw, apply, fq, filter]);
+  }, [searching, searchResults, raw, apply, fq, filter]);
 
   // Carga del mensaje abierto.
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
     let live = true;
-    source.getMessage(selectedId).then((d) => { if (live) setDetail(d); });
-    setOverrides((o) => (o[selectedId]?.read ? o : { ...o, [selectedId]: { ...o[selectedId], read: true } }));
+    source.getMessage(selectedId).then((d) => {
+      if (!live || !d) return;
+      setDetail(d);
+      if (!d.read && overridesRef.current[d.id]?.read === undefined) setRead(d.id, true);
+    }).catch(fail);
     return () => { live = false; };
   }, [selectedId]);
 
+  const overridesRef = useRef(overrides);
+  overridesRef.current = overrides;
+  const setRead = (id: string, read: boolean) => {
+    setOverrides((o) => ({ ...o, [id]: { ...o[id], read } }));
+    source.setFlags(id, { read }).catch(fail);
+  };
   const toggleStar = (id: string) => {
-    const cur = apply([...raw, ...(searchPool ?? [])].find((m) => m.id === id)!);
-    setOverrides((o) => ({ ...o, [id]: { ...o[id], starred: !cur.starred } }));
+    const base = [...raw, ...(searchResults ?? [])].find((m) => m.id === id) ?? (detail?.id === id ? detail : undefined);
+    if (!base) return;
+    const starred = !apply(base).starred;
+    setOverrides((o) => ({ ...o, [id]: { ...o[id], starred } }));
+    source.setFlags(id, { starred }).catch(fail);
   };
 
   // Atajos globales.
@@ -144,7 +160,7 @@ export default function App() {
       { label: 'Nuevo', disabled: true },
       { label: 'Abrir mensaje guardado…', disabled: true },
       { separator: true, label: '' },
-      { label: 'Guardar adjuntos', disabled: !detailView?.attachments.length, onClick: () => detailView?.attachments.forEach((a) => { const l = document.createElement('a'); l.href = a.dataUrl; l.download = a.filename; l.click(); }) },
+      { label: 'Guardar adjuntos', disabled: !detailView?.attachments.length, onClick: () => detailView?.attachments.forEach((a) => { const l = document.createElement('a'); l.href = a.url; l.download = a.filename; l.click(); }) },
       { label: 'Imprimir…', shortcut: 'Ctrl+P', onClick: () => window.print() },
     ] },
     { label: 'Editar', accessKey: 'E', items: [
@@ -161,7 +177,7 @@ export default function App() {
     ] },
     { label: 'Mensaje', accessKey: 'M', items: [
       { label: detailView?.starred ? 'Quitar destacado' : 'Destacar', shortcut: 'S', disabled: !detailView, onClick: () => detailView && toggleStar(detailView.id) },
-      { label: 'Marcar como no leído', disabled: !detailView, onClick: () => detailView && setOverrides((o) => ({ ...o, [detailView.id]: { ...o[detailView.id], read: false } })) },
+      { label: 'Marcar como no leído', disabled: !detailView, onClick: () => detailView && setRead(detailView.id, false) },
     ] },
     { label: 'Eventos y tareas', accessKey: 'n', items: [{ label: 'No disponible en el archivo', disabled: true }] },
     { label: 'Herramientas', accessKey: 'T', items: [{ label: 'Importar correos (próximamente)', disabled: true }] },
@@ -198,7 +214,8 @@ export default function App() {
           </div>
         </>}
       </main>
-      <StatusBar text={loading ? 'Cargando carpeta…' : searching ? `${visible.length} resultados` : ''} />
+      {error && <div className="error-bar" role="alert">Error al cargar datos: {error} <button onClick={() => setError(null)}>Cerrar</button></div>}
+      <StatusBar text={[usingConvex ? 'Convex' : 'Datos de prueba', loading ? 'Cargando carpeta…' : searching ? `${visible.length} resultados` : `${raw.length.toLocaleString('es-ES')} cargados`].join(' · ')} />
     </div>
   );
 }

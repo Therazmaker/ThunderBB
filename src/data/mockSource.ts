@@ -133,7 +133,7 @@ function detail(s: MessageSummary): MessageDetail {
     attachments.push({
       id: s.id + '-a1', filename: pick(r, ['reporte.png', 'cuadro_garantias.png', 'voucher.png']),
       mimeType: 'image/svg+xml', size: 20000 + Math.floor(r() * 400000),
-      dataUrl: svgDataUrl('Adjunto de ejemplo', '#2a7f62'),
+      url: svgDataUrl('Adjunto de ejemplo', '#2a7f62'),
     });
   }
   const inline = r() < 0.35 ? `<p><img alt="imagen" src="${svgDataUrl('Imagen inline (base64)', '#0061e0')}"></p>` : '';
@@ -175,4 +175,17 @@ export const mockSource: MailSource = {
     const s = byId.get(id);
     return s ? detail(s) : null;
   },
+  async search(q) {
+    const leaves: string[] = [];
+    const walk = (l: Folder[]) => l.forEach((f) => { if (f.total) leaves.push(f.id); walk(f.children); });
+    walk(tree);
+    const all = (await Promise.all(leaves.map((id) => this.listMessages(id)))).flat();
+    const n = normalize(q);
+    return all.filter((m) => normalize(`${m.subject} ${m.from.name ?? ''} ${m.from.email}`).includes(n)).slice(0, 1000);
+  },
+  async setFlags(id, flags) {
+    const m = byId.get(id);
+    if (m) Object.assign(m, flags);
+  },
 };
+const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');

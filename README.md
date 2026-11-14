@@ -11,9 +11,34 @@ npm install
 npm run dev
 ```
 
-## Estado actual
+## Fuente de datos
 
-Sólo el frontend, con datos ficticios generados en el navegador (`src/data/mockSource.ts`).
+- Sin `VITE_CONVEX_URL`: datos ficticios generados en el navegador (`src/data/mockSource.ts`).
+- Con `VITE_CONVEX_URL`: lee de Convex (`src/data/convexSource.ts`).
+
+## Convex
+
+```
+convex/
+  schema.ts     folders, messages (fila ligera + índice de búsqueda), messageBodies, attachments
+  folders.ts    list
+  messages.ts   listByFolder (paginado), search, get, setFlags
+  importer.ts   ensureFolder, insertMessages, generateUploadUrl, wipeBatch (protegidas con IMPORT_TOKEN)
+```
+
+Los adjuntos e imágenes inline se guardan como binarios en el storage de Convex (no en base64:
+base64 ocupa un 33% más). En el HTML las imágenes inline quedan como `cid:...` y se sustituyen por
+la URL del storage al abrir el mensaje.
+
+Puesta en marcha:
+
+1. `npx convex dev` (o con `CONVEX_DEPLOY_KEY` en el entorno, `npx convex dev --once`): despliega
+   las funciones y escribe `VITE_CONVEX_URL` en `.env.local`.
+2. `npx convex env set IMPORT_TOKEN <valor-largo-aleatorio>` y el mismo valor en `.env.local`.
+3. `npm run seed -- --limit 300` para cargar datos de prueba.
+4. En Vercel: variable `VITE_CONVEX_URL`.
+
+## Funcionalidades
 
 - Árbol de carpetas desplegable
 - Lista virtualizada (aguanta decenas de miles de mensajes), hilos con "N respuestas"

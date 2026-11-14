@@ -44,8 +44,8 @@ export interface Attachment {
   filename: string;
   mimeType: string;
   size: number;
-  /** data:<mime>;base64,... */
-  dataUrl: string;
+  /** URL del binario (storage de Convex) o data: URI en los datos de prueba. */
+  url: string;
 }
 
 /** Mensaje completo (se descarga al abrirlo). */

@@ -68,10 +68,10 @@ export function MessageReader({ msg, onToggleStar }: { msg: MessageDetail; onTog
           <ul className="att-list">
             {msg.attachments.map((a) => (
               <li key={a.id} className="att-item">
-                {a.mimeType.startsWith('image/') ? <img src={a.dataUrl} alt="" /> : <span className="att-ext">{a.filename.split('.').pop()}</span>}
+                {a.mimeType.startsWith('image/') ? <img src={a.url} alt="" /> : <span className="att-ext">{a.filename.split('.').pop()}</span>}
                 <span className="att-name" title={a.filename}>{a.filename}</span>
                 <span className="att-size">{formatSize(a.size)}</span>
-                <a className="rh-btn" href={a.dataUrl} download={a.filename} title="Guardar"><IconDownload size={14} /> <span>Guardar</span></a>
+                <a className="rh-btn" href={a.url} download={a.filename} target="_blank" rel="noreferrer" title="Guardar"><IconDownload size={14} /> <span>Guardar</span></a>
               </li>
             ))}
           </ul>
